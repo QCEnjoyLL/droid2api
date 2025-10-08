@@ -6,7 +6,7 @@ name: Docker Build and Push Multi-Arch
 # 工作流触发器
 on:
   push:
-    branches: [ "master" ] # 当代码推送到 master 分支时触发
+    branches: [ "main" ] # 当代码推送到 main 分支时触发
   workflow_dispatch: # 允许手动触发
 
 # 定义一个任务（Job）
