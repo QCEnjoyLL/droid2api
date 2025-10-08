@@ -11,7 +11,9 @@ let lastRefreshTime = null;
 let clientId = null;
 let authSource = null; // 'env' or 'file' or 'factory_key' or 'client'
 let authFilePath = null;
-let factoryApiKey = null; // From FACTORY_API_KEY environment variable
+let factoryApiKeys = []; // Array of API keys from FACTORY_API_KEY (supports multiple keys)
+let currentKeyIndex = 0; // Index for round-robin key selection
+let keyStats = {}; // Statistics for each key: { key: { used: count, lastUsed: timestamp, failures: count } }
 
 const REFRESH_URL = 'https://api.workos.com/user_management/authenticate';
 const REFRESH_INTERVAL_HOURS = 6; // Refresh every 6 hours
@@ -65,10 +67,23 @@ function loadAuthConfig() {
   // 1. Check FACTORY_API_KEY environment variable (highest priority)
   const factoryKey = process.env.FACTORY_API_KEY;
   if (factoryKey && factoryKey.trim() !== '') {
-    logInfo('Using fixed API key from FACTORY_API_KEY environment variable');
-    factoryApiKey = factoryKey.trim();
-    authSource = 'factory_key';
-    return { type: 'factory_key', value: factoryKey.trim() };
+    // Support multiple keys separated by comma
+    factoryApiKeys = factoryKey.split(',').map(key => key.trim()).filter(key => key !== '');
+
+    if (factoryApiKeys.length > 0) {
+      logInfo(`Using ${factoryApiKeys.length} fixed API key(s) from FACTORY_API_KEY environment variable`);
+      if (factoryApiKeys.length > 1) {
+        logInfo(`Multi-key rotation enabled with ${factoryApiKeys.length} keys`);
+      }
+
+      // Initialize statistics for each key
+      factoryApiKeys.forEach(key => {
+        keyStats[key] = { used: 0, lastUsed: null, failures: 0 };
+      });
+
+      authSource = 'factory_key';
+      return { type: 'factory_key', value: factoryApiKeys };
+    }
   }
 
   // 2. Check refresh token mechanism (DROID_REFRESH_KEY)
@@ -255,15 +270,47 @@ export async function initializeAuth() {
 }
 
 /**
+ * Get next API key using round-robin strategy
+ */
+function getNextApiKey() {
+  if (factoryApiKeys.length === 0) {
+    return null;
+  }
+
+  // Round-robin selection
+  const key = factoryApiKeys[currentKeyIndex];
+  currentKeyIndex = (currentKeyIndex + 1) % factoryApiKeys.length;
+
+  // Update statistics
+  keyStats[key].used++;
+  keyStats[key].lastUsed = new Date().toISOString();
+
+  return key;
+}
+
+/**
+ * Mark an API key as failed
+ */
+function markKeyFailure(key) {
+  if (keyStats[key]) {
+    keyStats[key].failures++;
+    logError(`API key failed (total failures: ${keyStats[key].failures})`, { keyPrefix: key.substring(0, 10) + '...' });
+  }
+}
+
+/**
  * Get API key based on configured authorization method
  * @param {string} clientAuthorization - Authorization header from client request (optional)
  */
 export async function getApiKey(clientAuthorization = null) {
-  // Priority 1: FACTORY_API_KEY environment variable
-  if (authSource === 'factory_key' && factoryApiKey) {
-    return `Bearer ${factoryApiKey}`;
+  // Priority 1: FACTORY_API_KEY environment variable (with multi-key rotation)
+  if (authSource === 'factory_key' && factoryApiKeys.length > 0) {
+    const key = getNextApiKey();
+    if (key) {
+      return `Bearer ${key}`;
+    }
   }
-  
+
   // Priority 2: Refresh token mechanism
   if (authSource === 'env' || authSource === 'file') {
     // Check if we need to refresh
@@ -278,13 +325,27 @@ export async function getApiKey(clientAuthorization = null) {
 
     return `Bearer ${currentApiKey}`;
   }
-  
+
   // Priority 3: Client authorization header
   if (clientAuthorization) {
     logDebug('Using client authorization header');
     return clientAuthorization;
   }
-  
+
   // No authorization available
   throw new Error('No authorization available. Please configure FACTORY_API_KEY, refresh token, or provide client authorization.');
+}
+
+/**
+ * Get key statistics (for admin panel)
+ */
+export function getKeyStats() {
+  return keyStats;
+}
+
+/**
+ * Get factory API keys (for admin panel)
+ */
+export function getFactoryApiKeys() {
+  return factoryApiKeys;
 }

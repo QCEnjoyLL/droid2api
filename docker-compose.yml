@@ -7,8 +7,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # 必需：设置refresh token
+      # Factory API 认证 (三选一，按优先级)
+      # 方式1: 固定API密钥（最高优先级，支持多key用逗号分隔）
+      - FACTORY_API_KEY=${FACTORY_API_KEY}
+      # 方式2: Refresh token自动刷新
       - DROID_REFRESH_KEY=${DROID_REFRESH_KEY}
+
+      # 本地访问控制（可选但强烈推荐）
+      # 本地API密钥（支持多个，用逗号分隔）
+      - LOCAL_API_KEYS=${LOCAL_API_KEYS}
+      # 管理员密码（用于访问/admin管理面板）
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+
       # 可选：如果需要修改端口，在config.json中配置
     volumes:
       # 可选：持久化auth.json以保存刷新的tokens
