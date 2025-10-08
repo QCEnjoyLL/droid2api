@@ -466,8 +466,8 @@ router.get('/admin', (req, res) => {
               </span>
             </td>
             <td>
-              <button class="secondary" onclick="verifyFactoryKey(${index})">验证</button>
-              <button class="danger" onclick="removeFactoryKeyByIndex(${index})">删除</button>
+              <button class="secondary" onclick="verifyFactoryKey(\${index})">验证</button>
+              <button class="danger" onclick="removeFactoryKeyByIndex(\${index})">删除</button>
             </td>
           </tr>
         \`).join('');
