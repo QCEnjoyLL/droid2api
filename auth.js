@@ -61,7 +61,7 @@ function generateClientId() {
 
 /**
  * Load auth configuration with priority system
- * Priority: FACTORY_API_KEY > refresh token mechanism > client authorization
+ * Priority: FACTORY_API_KEY > saved keys > refresh token mechanism > client authorization
  */
 function loadAuthConfig() {
   // 1. Check FACTORY_API_KEY environment variable (highest priority)
@@ -69,21 +69,28 @@ function loadAuthConfig() {
   if (factoryKey && factoryKey.trim() !== '') {
     // Support multiple keys separated by comma
     factoryApiKeys = factoryKey.split(',').map(key => key.trim()).filter(key => key !== '');
-
-    if (factoryApiKeys.length > 0) {
-      logInfo(`Using ${factoryApiKeys.length} fixed API key(s) from FACTORY_API_KEY environment variable`);
-      if (factoryApiKeys.length > 1) {
-        logInfo(`Multi-key rotation enabled with ${factoryApiKeys.length} keys`);
-      }
-
-      // Initialize statistics for each key
-      factoryApiKeys.forEach(key => {
-        keyStats[key] = { used: 0, lastUsed: null, failures: 0 };
-      });
-
-      authSource = 'factory_key';
-      return { type: 'factory_key', value: factoryApiKeys };
+  } else {
+    // 2. Load from saved config file if no environment variable
+    const savedKeys = loadFactoryKeys();
+    if (savedKeys.length > 0) {
+      factoryApiKeys = savedKeys;
+      logInfo(`Loaded ${factoryApiKeys.length} Factory API key(s) from saved config`);
     }
+  }
+
+  if (factoryApiKeys.length > 0) {
+    logInfo(`Using ${factoryApiKeys.length} Factory API key(s)`);
+    if (factoryApiKeys.length > 1) {
+      logInfo(`Multi-key rotation enabled with ${factoryApiKeys.length} keys`);
+    }
+
+    // Initialize statistics for each key
+    factoryApiKeys.forEach(key => {
+      keyStats[key] = { used: 0, lastUsed: null, failures: 0 };
+    });
+
+    authSource = 'factory_key';
+    return { type: 'factory_key', value: factoryApiKeys };
   }
 
   // 2. Check refresh token mechanism (DROID_REFRESH_KEY)
@@ -348,4 +355,122 @@ export function getKeyStats() {
  */
 export function getFactoryApiKeys() {
   return factoryApiKeys;
+}
+
+/**
+ * Add a new Factory API key
+ */
+export function addFactoryApiKey(key) {
+  if (!key || key.trim() === '') {
+    throw new Error('Invalid API key');
+  }
+
+  const trimmedKey = key.trim();
+
+  if (factoryApiKeys.includes(trimmedKey)) {
+    throw new Error('API key already exists');
+  }
+
+  factoryApiKeys.push(trimmedKey);
+
+  // Initialize statistics for the new key
+  keyStats[trimmedKey] = { used: 0, lastUsed: null, failures: 0 };
+
+  logInfo(`New Factory API key added (total: ${factoryApiKeys.length})`);
+
+  // Save to environment config file if possible
+  saveFactoryKeys();
+
+  return {
+    success: true,
+    totalKeys: factoryApiKeys.length
+  };
+}
+
+/**
+ * Remove a Factory API key
+ */
+export function removeFactoryApiKey(key) {
+  const index = factoryApiKeys.indexOf(key);
+
+  if (index === -1) {
+    throw new Error('API key not found');
+  }
+
+  factoryApiKeys.splice(index, 1);
+
+  // Remove statistics for the key
+  delete keyStats[key];
+
+  logInfo(`Factory API key removed (total: ${factoryApiKeys.length})`);
+
+  // Save to environment config file
+  saveFactoryKeys();
+
+  return {
+    success: true,
+    totalKeys: factoryApiKeys.length
+  };
+}
+
+/**
+ * Verify a Factory API key (test if it's valid)
+ */
+export async function verifyFactoryApiKey(key) {
+  try {
+    const testUrl = 'https://app.factory.ai/api/llm/o/v1/models';
+    const response = await fetch(testUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${key}`
+      }
+    });
+
+    return {
+      valid: response.ok,
+      status: response.status,
+      statusText: response.statusText
+    };
+  } catch (error) {
+    logError('Failed to verify Factory API key', error);
+    return {
+      valid: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Save Factory API keys to a config file for persistence
+ */
+function saveFactoryKeys() {
+  try {
+    const configPath = path.join(process.cwd(), 'factory_keys.json');
+    const data = {
+      keys: factoryApiKeys,
+      updated: new Date().toISOString()
+    };
+    fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+    logDebug(`Factory keys saved to ${configPath}`);
+  } catch (error) {
+    logError('Failed to save Factory keys', error);
+  }
+}
+
+/**
+ * Load Factory API keys from config file
+ */
+function loadFactoryKeys() {
+  try {
+    const configPath = path.join(process.cwd(), 'factory_keys.json');
+    if (fs.existsSync(configPath)) {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (data.keys && Array.isArray(data.keys)) {
+        return data.keys;
+      }
+    }
+  } catch (error) {
+    logDebug('No saved Factory keys found or error loading them');
+  }
+  return [];
 }

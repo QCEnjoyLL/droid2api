@@ -38,8 +38,15 @@ export function verifyLocalApiKey(req, res, next) {
     return next();
   }
 
-  // Skip verification for admin endpoints (they have their own auth)
-  if (req.path.startsWith('/admin')) {
+  // List of paths that don't require authentication
+  const publicPaths = [
+    '/',              // Root path - service info
+    '/health',        // Health check
+    '/admin',         // Admin panel (has its own auth)
+  ];
+
+  // Skip verification for public paths and admin endpoints
+  if (publicPaths.includes(req.path) || req.path.startsWith('/admin')) {
     return next();
   }
 

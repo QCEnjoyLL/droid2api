@@ -6,7 +6,13 @@ import {
   removeLocalApiKey,
   generateApiKey
 } from './middleware.js';
-import { getKeyStats, getFactoryApiKeys } from './auth.js';
+import {
+  getKeyStats,
+  getFactoryApiKeys,
+  addFactoryApiKey,
+  removeFactoryApiKey,
+  verifyFactoryApiKey
+} from './auth.js';
 
 const router = express.Router();
 
@@ -294,18 +300,24 @@ router.get('/admin', (req, res) => {
 
       <!-- Factory API Keys Section -->
       <div class="section">
-        <h2>🏭 Factory API密钥状态</h2>
+        <h2>🏭 Factory API密钥管理</h2>
         <p style="color: #666; margin-bottom: 15px;">
-          这些密钥通过环境变量FACTORY_API_KEY配置，无法在此修改
+          管理Factory API密钥，可以添加、验证和删除密钥
         </p>
+        <div class="input-group">
+          <input type="text" id="newFactoryKey" placeholder="输入Factory API密钥（格式：fk-xxx）" />
+          <button onclick="verifyAndAddFactoryKey()">验证并添加</button>
+          <button class="secondary" onclick="addFactoryKeyDirect()">直接添加</button>
+        </div>
         <table id="factoryKeysTable">
           <thead>
             <tr>
-              <th>密钥前缀</th>
+              <th>密钥</th>
               <th>使用次数</th>
               <th>最后使用</th>
               <th>失败次数</th>
               <th>状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody id="factoryKeysBody">
@@ -422,6 +434,9 @@ router.get('/admin', (req, res) => {
       }
     }
 
+    // Store full keys for management (received from backend)
+    let fullFactoryKeys = [];
+
     // Load factory keys
     async function loadFactoryKeys() {
       try {
@@ -430,13 +445,16 @@ router.get('/admin', (req, res) => {
         });
         const data = await response.json();
 
+        // Store full keys for management operations
+        fullFactoryKeys = data.keys.map(k => k.key);
+
         const tbody = document.getElementById('factoryKeysBody');
         if (data.keys.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">未配置Factory API密钥</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">未配置Factory API密钥，点击上方按钮添加</td></tr>';
           return;
         }
 
-        tbody.innerHTML = data.keys.map(k => \`
+        tbody.innerHTML = data.keys.map((k, index) => \`
           <tr>
             <td class="key-display">\${k.prefix}</td>
             <td>\${k.used}</td>
@@ -446,6 +464,10 @@ router.get('/admin', (req, res) => {
               <span class="badge \${k.failures > 0 ? 'warning' : 'active'}">
                 \${k.failures > 0 ? '有失败' : '正常'}
               </span>
+            </td>
+            <td>
+              <button class="secondary" onclick="verifyFactoryKey(${index})">验证</button>
+              <button class="danger" onclick="removeFactoryKeyByIndex(${index})">删除</button>
             </td>
           </tr>
         \`).join('');
@@ -527,6 +549,146 @@ router.get('/admin', (req, res) => {
           loadDashboard();
         } else {
           showMainAlert('删除失败', 'error');
+        }
+      } catch (error) {
+        showMainAlert('删除失败: ' + error.message, 'error');
+      }
+    }
+
+    // Verify and add Factory key
+    async function verifyAndAddFactoryKey() {
+      const keyInput = document.getElementById('newFactoryKey');
+      const key = keyInput.value.trim();
+
+      if (!key) {
+        showMainAlert('请输入Factory API密钥', 'error');
+        return;
+      }
+
+      showMainAlert('正在验证密钥...', 'success');
+
+      try {
+        const response = await fetch('/admin/api/keys/factory', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authToken
+          },
+          body: JSON.stringify({ key, verify: true })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showMainAlert('密钥验证成功并已添加', 'success');
+          keyInput.value = '';
+          loadDashboard();
+        } else {
+          showMainAlert(data.message || '验证失败，密钥无效', 'error');
+        }
+      } catch (error) {
+        showMainAlert('添加失败: ' + error.message, 'error');
+      }
+    }
+
+    // Add Factory key directly (without verification)
+    async function addFactoryKeyDirect() {
+      const keyInput = document.getElementById('newFactoryKey');
+      const key = keyInput.value.trim();
+
+      if (!key) {
+        showMainAlert('请输入Factory API密钥', 'error');
+        return;
+      }
+
+      if (!confirm('确定要直接添加此密钥（不验证）吗？')) {
+        return;
+      }
+
+      try {
+        const response = await fetch('/admin/api/keys/factory', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authToken
+          },
+          body: JSON.stringify({ key, verify: false })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showMainAlert('密钥已添加', 'success');
+          keyInput.value = '';
+          loadDashboard();
+        } else {
+          showMainAlert(data.message || '添加失败', 'error');
+        }
+      } catch (error) {
+        showMainAlert('添加失败: ' + error.message, 'error');
+      }
+    }
+
+    // Verify Factory key
+    async function verifyFactoryKey(index) {
+      const fullKey = fullFactoryKeys[index];
+      if (!fullKey) {
+        showMainAlert('无法获取完整密钥进行验证', 'error');
+        return;
+      }
+
+      showMainAlert('正在验证密钥...', 'success');
+
+      try {
+        const verifyResponse = await fetch('/admin/api/keys/factory/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authToken
+          },
+          body: JSON.stringify({ key: fullKey })
+        });
+
+        const verifyData = await verifyResponse.json();
+
+        if (verifyData.valid) {
+          showMainAlert('密钥有效 ✓ (状态: ' + verifyData.status + ')', 'success');
+        } else {
+          showMainAlert('密钥无效 ✗ (状态: ' + (verifyData.status || 'error') + ')', 'error');
+        }
+      } catch (error) {
+        showMainAlert('验证失败: ' + error.message, 'error');
+      }
+    }
+
+    // Remove Factory key by index
+    async function removeFactoryKeyByIndex(index) {
+      const fullKey = fullFactoryKeys[index];
+      if (!fullKey) {
+        showMainAlert('无法获取密钥信息', 'error');
+        return;
+      }
+
+      if (!confirm('确定要删除这个Factory API密钥吗？')) {
+        return;
+      }
+
+      try {
+        const deleteResponse = await fetch('/admin/api/keys/factory', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + authToken
+          },
+          body: JSON.stringify({ key: fullKey })
+        });
+
+        if (deleteResponse.ok) {
+          showMainAlert('密钥删除成功', 'success');
+          loadDashboard();
+        } else {
+          const data = await deleteResponse.json();
+          showMainAlert(data.message || '删除失败', 'error');
         }
       } catch (error) {
         showMainAlert('删除失败: ' + error.message, 'error');
@@ -644,6 +806,7 @@ router.delete('/admin/api/keys/local', verifyAdminAuth, (req, res) => {
 /**
  * GET /admin/api/keys/factory
  * Get Factory API keys status
+ * Returns full keys for admin management
  */
 router.get('/admin/api/keys/factory', verifyAdminAuth, (req, res) => {
   const keys = getFactoryApiKeys();
@@ -652,6 +815,7 @@ router.get('/admin/api/keys/factory', verifyAdminAuth, (req, res) => {
   const keysWithStats = keys.map(key => {
     const stats = keyStats[key] || { used: 0, lastUsed: null, failures: 0 };
     return {
+      key: key,  // Full key for management purposes
       prefix: key.substring(0, 10) + '...',
       used: stats.used,
       lastUsed: stats.lastUsed,
@@ -669,6 +833,88 @@ router.get('/admin/api/keys/factory', verifyAdminAuth, (req, res) => {
 router.post('/admin/api/keys/generate', verifyAdminAuth, (req, res) => {
   const key = generateApiKey();
   res.json({ key });
+});
+
+/**
+ * POST /admin/api/keys/factory
+ * Add a new Factory API key
+ */
+router.post('/admin/api/keys/factory', verifyAdminAuth, async (req, res) => {
+  try {
+    const { key, verify } = req.body;
+
+    if (!key || key.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'API key is required'
+      });
+    }
+
+    // Optionally verify the key before adding
+    if (verify) {
+      const verifyResult = await verifyFactoryApiKey(key.trim());
+      if (!verifyResult.valid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid Factory API key',
+          details: verifyResult
+        });
+      }
+    }
+
+    const result = addFactoryApiKey(key);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /admin/api/keys/factory
+ * Remove a Factory API key
+ */
+router.delete('/admin/api/keys/factory', verifyAdminAuth, (req, res) => {
+  try {
+    const { key } = req.body;
+    const result = removeFactoryApiKey(key);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /admin/api/keys/factory/verify
+ * Verify a Factory API key (test if it's valid)
+ */
+router.post('/admin/api/keys/factory/verify', verifyAdminAuth, async (req, res) => {
+  try {
+    const { key } = req.body;
+
+    if (!key || key.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'API key is required'
+      });
+    }
+
+    const result = await verifyFactoryApiKey(key.trim());
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 });
 
 export default router;
