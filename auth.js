@@ -11,9 +11,7 @@ let lastRefreshTime = null;
 let clientId = null;
 let authSource = null; // 'env' or 'file' or 'factory_key' or 'client'
 let authFilePath = null;
-let factoryApiKeys = []; // Array of API keys from FACTORY_API_KEY (supports multiple keys)
-let currentKeyIndex = 0; // Index for round-robin key selection
-let keyStats = {}; // Statistics for each key: { key: { used: count, lastUsed: timestamp, failures: count } }
+let factoryApiKey = null; // From FACTORY_API_KEY environment variable
 
 const REFRESH_URL = 'https://api.workos.com/user_management/authenticate';
 const REFRESH_INTERVAL_HOURS = 6; // Refresh every 6 hours
@@ -61,36 +59,16 @@ function generateClientId() {
 
 /**
  * Load auth configuration with priority system
- * Priority: FACTORY_API_KEY > saved keys > refresh token mechanism > client authorization
+ * Priority: FACTORY_API_KEY > refresh token mechanism > client authorization
  */
 function loadAuthConfig() {
   // 1. Check FACTORY_API_KEY environment variable (highest priority)
   const factoryKey = process.env.FACTORY_API_KEY;
   if (factoryKey && factoryKey.trim() !== '') {
-    // Support multiple keys separated by comma
-    factoryApiKeys = factoryKey.split(',').map(key => key.trim()).filter(key => key !== '');
-  } else {
-    // 2. Load from saved config file if no environment variable
-    const savedKeys = loadFactoryKeys();
-    if (savedKeys.length > 0) {
-      factoryApiKeys = savedKeys;
-      logInfo(`Loaded ${factoryApiKeys.length} Factory API key(s) from saved config`);
-    }
-  }
-
-  if (factoryApiKeys.length > 0) {
-    logInfo(`Using ${factoryApiKeys.length} Factory API key(s)`);
-    if (factoryApiKeys.length > 1) {
-      logInfo(`Multi-key rotation enabled with ${factoryApiKeys.length} keys`);
-    }
-
-    // Initialize statistics for each key
-    factoryApiKeys.forEach(key => {
-      keyStats[key] = { used: 0, lastUsed: null, failures: 0 };
-    });
-
+    logInfo('Using fixed API key from FACTORY_API_KEY environment variable');
+    factoryApiKey = factoryKey.trim();
     authSource = 'factory_key';
-    return { type: 'factory_key', value: factoryApiKeys };
+    return { type: 'factory_key', value: factoryKey.trim() };
   }
 
   // 2. Check refresh token mechanism (DROID_REFRESH_KEY)
@@ -277,47 +255,15 @@ export async function initializeAuth() {
 }
 
 /**
- * Get next API key using round-robin strategy
- */
-function getNextApiKey() {
-  if (factoryApiKeys.length === 0) {
-    return null;
-  }
-
-  // Round-robin selection
-  const key = factoryApiKeys[currentKeyIndex];
-  currentKeyIndex = (currentKeyIndex + 1) % factoryApiKeys.length;
-
-  // Update statistics
-  keyStats[key].used++;
-  keyStats[key].lastUsed = new Date().toISOString();
-
-  return key;
-}
-
-/**
- * Mark an API key as failed
- */
-function markKeyFailure(key) {
-  if (keyStats[key]) {
-    keyStats[key].failures++;
-    logError(`API key failed (total failures: ${keyStats[key].failures})`, { keyPrefix: key.substring(0, 10) + '...' });
-  }
-}
-
-/**
  * Get API key based on configured authorization method
  * @param {string} clientAuthorization - Authorization header from client request (optional)
  */
 export async function getApiKey(clientAuthorization = null) {
-  // Priority 1: FACTORY_API_KEY environment variable (with multi-key rotation)
-  if (authSource === 'factory_key' && factoryApiKeys.length > 0) {
-    const key = getNextApiKey();
-    if (key) {
-      return `Bearer ${key}`;
-    }
+  // Priority 1: FACTORY_API_KEY environment variable
+  if (authSource === 'factory_key' && factoryApiKey) {
+    return `Bearer ${factoryApiKey}`;
   }
-
+  
   // Priority 2: Refresh token mechanism
   if (authSource === 'env' || authSource === 'file') {
     // Check if we need to refresh
@@ -332,145 +278,13 @@ export async function getApiKey(clientAuthorization = null) {
 
     return `Bearer ${currentApiKey}`;
   }
-
+  
   // Priority 3: Client authorization header
   if (clientAuthorization) {
     logDebug('Using client authorization header');
     return clientAuthorization;
   }
-
+  
   // No authorization available
   throw new Error('No authorization available. Please configure FACTORY_API_KEY, refresh token, or provide client authorization.');
-}
-
-/**
- * Get key statistics (for admin panel)
- */
-export function getKeyStats() {
-  return keyStats;
-}
-
-/**
- * Get factory API keys (for admin panel)
- */
-export function getFactoryApiKeys() {
-  return factoryApiKeys;
-}
-
-/**
- * Add a new Factory API key
- */
-export function addFactoryApiKey(key) {
-  if (!key || key.trim() === '') {
-    throw new Error('Invalid API key');
-  }
-
-  const trimmedKey = key.trim();
-
-  if (factoryApiKeys.includes(trimmedKey)) {
-    throw new Error('API key already exists');
-  }
-
-  factoryApiKeys.push(trimmedKey);
-
-  // Initialize statistics for the new key
-  keyStats[trimmedKey] = { used: 0, lastUsed: null, failures: 0 };
-
-  logInfo(`New Factory API key added (total: ${factoryApiKeys.length})`);
-
-  // Save to environment config file if possible
-  saveFactoryKeys();
-
-  return {
-    success: true,
-    totalKeys: factoryApiKeys.length
-  };
-}
-
-/**
- * Remove a Factory API key
- */
-export function removeFactoryApiKey(key) {
-  const index = factoryApiKeys.indexOf(key);
-
-  if (index === -1) {
-    throw new Error('API key not found');
-  }
-
-  factoryApiKeys.splice(index, 1);
-
-  // Remove statistics for the key
-  delete keyStats[key];
-
-  logInfo(`Factory API key removed (total: ${factoryApiKeys.length})`);
-
-  // Save to environment config file
-  saveFactoryKeys();
-
-  return {
-    success: true,
-    totalKeys: factoryApiKeys.length
-  };
-}
-
-/**
- * Verify a Factory API key (test if it's valid)
- */
-export async function verifyFactoryApiKey(key) {
-  try {
-    const testUrl = 'https://app.factory.ai/api/llm/o/v1/models';
-    const response = await fetch(testUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${key}`
-      }
-    });
-
-    return {
-      valid: response.ok,
-      status: response.status,
-      statusText: response.statusText
-    };
-  } catch (error) {
-    logError('Failed to verify Factory API key', error);
-    return {
-      valid: false,
-      error: error.message
-    };
-  }
-}
-
-/**
- * Save Factory API keys to a config file for persistence
- */
-function saveFactoryKeys() {
-  try {
-    const configPath = path.join(process.cwd(), 'factory_keys.json');
-    const data = {
-      keys: factoryApiKeys,
-      updated: new Date().toISOString()
-    };
-    fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
-    logDebug(`Factory keys saved to ${configPath}`);
-  } catch (error) {
-    logError('Failed to save Factory keys', error);
-  }
-}
-
-/**
- * Load Factory API keys from config file
- */
-function loadFactoryKeys() {
-  try {
-    const configPath = path.join(process.cwd(), 'factory_keys.json');
-    if (fs.existsSync(configPath)) {
-      const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      if (data.keys && Array.isArray(data.keys)) {
-        return data.keys;
-      }
-    }
-  } catch (error) {
-    logDebug('No saved Factory keys found or error loading them');
-  }
-  return [];
 }

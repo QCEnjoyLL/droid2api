@@ -4,24 +4,12 @@ OpenAI 兼容的 API 代理服务器，统一访问不同的 LLM 模型。
 
 ## 核心功能
 
-### 🔐 三层安全架构
-- **Factory API认证（上游）** - 连接Factory服务的身份认证
-  - FACTORY_API_KEY优先级 - 环境变量设置固定API密钥，**支持多key轮询**
-  - 令牌自动刷新 - WorkOS OAuth集成，系统每6小时自动刷新access_token
-  - 客户端授权回退 - 无配置时使用客户端请求头的authorization字段
-  - 智能优先级 - FACTORY_API_KEY > refresh_token > 客户端authorization
-  - 容错启动 - 无任何认证配置时不报错，继续运行支持客户端授权
-
-- **本地访问控制（下游）** - 保护你的API服务不被滥用
-  - 多密钥支持 - LOCAL_API_KEYS环境变量配置，逗号分隔多个密钥
-  - 自动验证 - 所有API请求需要携带有效的Authorization头
-  - 可选配置 - 未配置时不启用验证，适合本地开发
-
-- **管理员面板** - 可视化管理界面 `/admin`
-  - 密码保护 - ADMIN_PASSWORD环境变量配置访问密码
-  - 密钥管理 - 在线查看、添加、删除本地API密钥
-  - 统计监控 - 查看Factory密钥使用统计、请求次数、失败次数
-  - 密钥生成 - 一键生成安全的随机API密钥
+### 🔐 双重授权机制
+- **FACTORY_API_KEY优先级** - 环境变量设置固定API密钥，跳过自动刷新
+- **令牌自动刷新** - WorkOS OAuth集成，系统每6小时自动刷新access_token
+- **客户端授权回退** - 无配置时使用客户端请求头的authorization字段
+- **智能优先级** - FACTORY_API_KEY > refresh_token > 客户端authorization
+- **容错启动** - 无任何认证配置时不报错，继续运行支持客户端授权
 
 ### 🧠 模型推理能力级别
 - **四档推理级别** - off/low/medium/high，精确控制模型思考深度
@@ -67,20 +55,20 @@ npm install
 
 ## 快速开始
 
-### 1. 配置Factory API认证（三种方式）
+### 1. 配置认证（三种方式）
 
 **优先级：FACTORY_API_KEY > refresh_token > 客户端authorization**
 
 ```bash
-# 方式1：固定API密钥（最高优先级）- 支持多key轮询
-export FACTORY_API_KEY="key1,key2,key3"  # 多个key用逗号分隔，自动轮询
+# 方式1：固定API密钥（最高优先级）
+export FACTORY_API_KEY="your_factory_api_key_here"
 
 # 方式2：自动刷新令牌
 export DROID_REFRESH_KEY="your_refresh_token_here"
 
 # 方式3：配置文件 ~/.factory/auth.json
 {
-  "access_token": "your_access_token",
+  "access_token": "your_access_token", 
   "refresh_token": "your_refresh_token"
 }
 
@@ -88,22 +76,7 @@ export DROID_REFRESH_KEY="your_refresh_token_here"
 # 服务器将使用客户端请求头中的authorization字段
 ```
 
-### 2. 配置本地访问控制（强烈推荐）
-
-```bash
-# 设置本地API密钥（支持多个，逗号分隔）
-export LOCAL_API_KEYS="local_key_1,local_key_2,local_key_3"
-
-# 设置管理员密码（用于访问 /admin 管理面板）
-export ADMIN_PASSWORD="your_secure_admin_password"
-```
-
-**安全说明：**
-- `LOCAL_API_KEYS` - 保护你的API不被未授权访问，特别是部署到公网时
-- `ADMIN_PASSWORD` - 保护管理面板，建议使用强密码
-- 如果不配置这两项，API将对所有人开放（仅适合本地开发）
-
-### 3. 配置模型（可选）
+### 2. 配置模型（可选）
 
 编辑 `config.json` 添加或修改模型：
 
@@ -186,18 +159,6 @@ start.bat
 
 #### 使用docker-compose（推荐）
 
-首先创建 `.env` 文件（参考 `.env.example`）：
-
-```bash
-# 复制示例配置
-cp .env.example .env
-
-# 编辑配置文件，填入你的密钥
-nano .env
-```
-
-然后启动服务：
-
 ```bash
 # 构建并启动服务
 docker-compose up -d
@@ -215,14 +176,11 @@ docker-compose down
 # 构建镜像
 docker build -t droid2api .
 
-# 运行容器（完整配置示例）
+# 运行容器
 docker run -d \
-  -p 8010:3000 \
-  -e FACTORY_API_KEY="key1,key2,key3" \
-  -e LOCAL_API_KEYS="local_key_1,local_key_2" \
-  -e ADMIN_PASSWORD="your_admin_password" \
+  -p 3000:3000 \
+  -e DROID_REFRESH_KEY="your_refresh_token" \
   --name droid2api \
-  --restart unless-stopped \
   droid2api
 ```
 
@@ -230,16 +188,7 @@ docker run -d \
 
 Docker部署支持以下环境变量：
 
-**Factory API认证（三选一）：**
-- `FACTORY_API_KEY` - Factory固定API密钥，支持多key轮询（逗号分隔）
-- `DROID_REFRESH_KEY` - 刷新令牌，自动刷新机制
-- 不配置则使用客户端authorization头
-
-**本地访问控制（强烈推荐）：**
-- `LOCAL_API_KEYS` - 本地API密钥，支持多个（逗号分隔）
-- `ADMIN_PASSWORD` - 管理员密码，用于访问 `/admin` 面板
-
-**其他配置：**
+- `DROID_REFRESH_KEY` - 刷新令牌（必需）
 - `PORT` - 服务端口（默认3000）
 - `NODE_ENV` - 运行环境（production/development）
 
@@ -312,58 +261,6 @@ curl http://localhost:3000/v1/chat/completions \
 - `max_tokens` - 最大输出长度
 - `temperature` - 温度参数（0-1）
 
-#### 使用本地API密钥
-
-配置了 `LOCAL_API_KEYS` 后，所有API请求需要携带Authorization头：
-
-```bash
-curl http://localhost:8010/v1/models \
-  -H "Authorization: Bearer your_local_api_key"
-
-curl http://localhost:8010/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your_local_api_key" \
-  -d '{
-    "model": "claude-sonnet-4-5-20250929",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-```
-
-### 管理面板使用
-
-#### 访问管理面板
-
-1. 浏览器访问：`http://localhost:8010/admin` （将端口改为你的实际端口）
-2. 输入管理员密码（`ADMIN_PASSWORD` 环境变量配置的密码）
-3. 登录后可以：
-   - 📊 查看系统统计（本地密钥数、Factory密钥数、总请求次数、失败次数）
-   - 🔑 管理本地API密钥（查看、添加、删除、生成）
-   - 🏭 管理Factory API密钥（添加、验证、删除、监控状态）
-
-#### 功能说明
-
-**本地API密钥管理：**
-- 在线添加新密钥（手动输入或自动生成）
-- 一键生成安全随机密钥（格式：`droid2api_xxx`）
-- 删除不再使用的密钥
-- 查看所有配置的密钥
-
-**Factory密钥管理：**
-- 在线添加Factory密钥（支持验证后添加或直接添加）
-- 验证密钥有效性（测试密钥是否可用）
-- 删除不再使用的密钥
-- 查看每个密钥的使用统计和状态
-- 监控失败次数，及时发现问题密钥
-- 记录最后使用时间
-- 密钥轮询状态一目了然
-
-**注意：**
-- Factory密钥可通过管理面板动态管理，也可通过环境变量 `FACTORY_API_KEY` 配置
-- 通过管理面板添加的密钥会保存到 `factory_keys.json` 文件
-- 本地密钥和Factory密钥的修改都会立即生效，无需重启服务
-- 管理面板的所有操作都会记录在日志中
-- 添加密钥时建议使用"验证并添加"功能，确保密钥有效
-
 ## 常见问题
 
 ### 如何配置授权机制？
@@ -390,48 +287,6 @@ droid2api支持三级授权优先级：
 - **开发环境** - 使用固定密钥避免令牌过期问题
 - **CI/CD流水线** - 稳定的认证，不依赖刷新机制
 - **临时测试** - 快速设置，无需配置refresh_token
-- **多密钥负载均衡** - 配置多个key自动轮询，提高并发能力
-
-### FACTORY_API_KEY多key轮询如何工作？
-
-**配置多key：**
-```bash
-# 使用逗号分隔多个key
-export FACTORY_API_KEY="key1,key2,key3"
-```
-
-**轮询策略：**
-- Round-robin轮询：按顺序循环使用每个key
-- 自动统计：记录每个key的使用次数、最后使用时间、失败次数
-- 透明切换：客户端无感知，服务器自动选择下一个key
-- 故障标记：失败的key会被记录，可在管理面板查看
-
-**优势：**
-- 提高并发处理能力（多个key并发限制叠加）
-- 分散单个key的负载
-- 提供冗余（某个key失效时其他key继续工作）
-- 实时监控每个key的健康状态
-
-### 如何保护API不被滥用？
-
-**强烈推荐配置本地访问控制：**
-
-```bash
-# Docker启动时添加本地密钥
-docker run -d \
-  -e FACTORY_API_KEY="your_factory_keys" \
-  -e LOCAL_API_KEYS="key1,key2" \
-  -e ADMIN_PASSWORD="admin_pwd" \
-  -p 8010:3000 \
-  droid2api
-```
-
-**安全最佳实践：**
-1. 总是配置 `LOCAL_API_KEYS`，特别是公网部署
-2. 使用强密码作为 `ADMIN_PASSWORD`
-3. 定期通过管理面板检查密钥使用情况
-4. 及时删除不再使用的本地密钥
-5. 监控Factory密钥失败次数，发现异常及时处理
 
 ### 如何配置推理级别？
 

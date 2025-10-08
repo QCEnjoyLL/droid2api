@@ -50,7 +50,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/factory2api # <-- ！！！重要：替换为你的镜像名
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/droid2api # <-- ！！！重要：替换为你的镜像名
           tags: |
             type=schedule
             type=ref,event=branch

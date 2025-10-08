@@ -2,9 +2,7 @@ import express from 'express';
 import { loadConfig, isDevMode, getPort } from './config.js';
 import { logInfo, logError } from './logger.js';
 import router from './routes.js';
-import adminRouter from './admin-routes.js';
 import { initializeAuth } from './auth.js';
-import { initializeLocalAuth, verifyLocalApiKey } from './middleware.js';
 
 const app = express();
 
@@ -15,20 +13,13 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+  
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
   next();
 });
 
-// Apply local API key verification middleware
-app.use(verifyLocalApiKey);
-
-// Register admin routes
-app.use(adminRouter);
-
-// Register main API routes
 app.use(router);
 
 app.get('/', (req, res) => {
@@ -118,20 +109,7 @@ app.use((err, req, res, next) => {
     loadConfig();
     logInfo('Configuration loaded successfully');
     logInfo(`Dev mode: ${isDevMode()}`);
-
-    // Initialize local authentication (for API access control)
-    const localAuthStatus = initializeLocalAuth();
-    if (localAuthStatus.localAuthEnabled) {
-      logInfo('✓ Local API key authentication is enabled');
-    } else {
-      logInfo('⚠ Local API key authentication is disabled (no LOCAL_API_KEYS configured)');
-    }
-    if (localAuthStatus.adminEnabled) {
-      logInfo('✓ Admin panel is enabled');
-    } else {
-      logInfo('⚠ Admin panel is disabled (no ADMIN_PASSWORD configured)');
-    }
-
+    
     // Initialize auth system (load and setup API key if needed)
     // This won't throw error if no auth config is found - will use client auth
     await initializeAuth();
